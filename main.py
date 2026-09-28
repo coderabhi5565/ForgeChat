@@ -5,7 +5,8 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 from langgraph.graph import StateGraph, START, END
 from langgraph.graph.message import add_messages
 from langgraph.checkpoint.memory import InMemorySaver
-
+from langgraph.prebuilt import ToolNode, tools_condition
+from tools import tools
 import os
 
 load_dotenv()
@@ -18,20 +19,50 @@ llm = ChatGoogleGenerativeAI(
 class State(TypedDict):
     messages: Annotated[list[BaseMessage], add_messages]
 
+llm_with_tools = llm.bind_tools(tools)
+
 def chat(state: State):
-    response = llm.invoke(state["messages"])
+
+    response = llm_with_tools.invoke(
+        state["messages"]
+    )
+
     return {
         "messages": [response]
     }
 
 graph = StateGraph(State)
 
-checkpoint = InMemorySaver()
 graph.add_node("chat", chat)
-graph.add_edge(START, "chat")
-graph.add_edge("chat", END)
 
-app = graph.compile(checkpointer=checkpoint)
+graph.add_node(
+    "tools",
+    ToolNode(tools)
+)
+
+
+graph.add_edge(
+    START,
+    "chat"
+)
+
+
+graph.add_conditional_edges(
+    "chat",
+    tools_condition
+)
+
+
+graph.add_edge(
+    "tools",
+    "chat"
+)
+
+checkpoint = InMemorySaver()
+
+app = graph.compile(
+    checkpointer=checkpoint
+)
 
 config = {
     "configurable": {
@@ -40,9 +71,12 @@ config = {
 }
 
 while True:
+
     user_input = input("You: ")
+
     if user_input.lower() == "exit":
         break
+
     result = app.invoke(
         {
             "messages": [
@@ -52,4 +86,7 @@ while True:
         config=config
     )
 
-    print("AI:", result["messages"][-1].content)
+    print(
+        "AI:",
+        result["messages"][-1].content
+    )
